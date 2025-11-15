@@ -56,7 +56,25 @@ def joinFactorsByVariableWithCallTracking(callTrackingList=None):
 
 joinFactorsByVariable = joinFactorsByVariableWithCallTracking()
 
+def getJoinedVariables(factors):
+    
+    # union of all unconditioned variables 
+    unconditionedSets = [set(factor.unconditionedVariables()) for factor in factors]
+    newUnconditioned = set().union(*unconditionedSets)
+    
+    # conditioned in *any* input factor.
+    allConditioned= set().union(*[set(factor.conditionedVariables()) for factor in factors])
+    
+    # factor *but* were not promoted to unconditioned in the result.
+    newConditioned = allConditioned - newUnconditioned
+    
+    return list(newUnconditioned), list(newConditioned)
 
+def createJoinedFactor(unconditioned, conditioned, factorDomainsDict):
+   
+    # new Factor using the determined variables and the shared domain dictionary
+    newFactor = Factor(unconditioned, conditioned, factorDomainsDict)
+    return newFactor
 def joinFactors(factors):
     """
     Question 3: Your join implementation 
@@ -102,7 +120,60 @@ def joinFactors(factors):
 
 
     "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+    if not factors:
+        return Factor([], [], {})
+
+    newUnconditioned, newConditioned = getJoinedVariables(factors)
+
+    # domain dictionary 
+    variableDomainsDict = factors[0].variableDomainsDict()
+
+    newFactor = createJoinedFactor(newUnconditioned, newConditioned, variableDomainsDict)
+
+    
+    for assignmentDict in newFactor.getAllPossibleAssignmentDicts():
+        
+        jointProbability = 1.0
+        
+        # joint probability by multiplying corresponding rows from all input factors
+        for factor in factors:
+            factorProb = factor.getProbability(assignmentDict)
+            jointProbability *= factorProb
+        
+        # calculated probability in the new factor
+        newFactor.setProbability(assignmentDict, jointProbability)
+
+    return newFactor
+
+def sumOutEliminatedVars(newDict, oldFactor, eliminationVar):
+
+    varDomainsDict = oldFactor.variableDomainsDict()
+    elimVarDomain = varDomainsDict[eliminationVar]
+    
+    marginalProbability = 0.0
+    
+    for eliminationValue in elimVarDomain:
+        
+        #full assignment for the old factor
+        fullAssignmentDict = newDict.copy()
+        fullAssignmentDict[eliminationVar] = eliminationValue
+        
+        # probability from the original factor and sum
+        oldProb = oldFactor.getProbability(fullAssignmentDict)
+        marginalProbability += oldProb
+        
+    return marginalProbability
+
+def fillFactorProbs(newFactor, oldFactor, eliminationVar):
+
+    for newAssignmentDict in newFactor.getAllPossibleAssignmentDicts():
+        
+        #marginalized probability using the summation helper
+        marginalProbability = sumOutEliminatedVars(newAssignmentDict, oldFactor, eliminationVar)
+        
+        newFactor.setProbability(newAssignmentDict, marginalProbability)
+        
+    return newFactor
 
 
 def eliminateWithCallTracking(callTrackingList=None):
@@ -151,7 +222,17 @@ def eliminateWithCallTracking(callTrackingList=None):
                     "unconditionedVariables: " + str(factor.unconditionedVariables()))
 
         "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        #shud stay the same
+        newUnconditioned = list(factor.unconditionedVariables() - {eliminationVariable})
+        newConditioned = list(factor.conditionedVariables())
+        
+        domainsDict = factor.variableDomainsDict()
+        
+        newFactor = Factor(newUnconditioned, newConditioned, domainsDict)
+        
+        newFactor = fillFactorProbs(newFactor, factor, eliminationVariable)
+
+        return newFactor
 
     return eliminate
 

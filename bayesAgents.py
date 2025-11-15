@@ -61,6 +61,34 @@ ENTER_LEFT = 0
 ENTER_RIGHT = 1
 EXPLORE = 2
 
+def getObservationVariables(gameState):
+    obsVars = []
+    # The full set of observation variables is determined by possible wall locations.
+    for housePos in gameState.getPossibleHouses():
+        for obsPos in gameState.getHouseWalls(housePos):
+            obsVar = OBS_VAR_TEMPLATE % obsPos
+            if obsVar not in obsVars:
+                obsVars.append(obsVar)
+    return obsVars
+
+def getBayesNetEdges(obsVars):
+    edges = []
+    
+    # X Positions -> Food house, Ghost house
+    # Y Positions -> Food house, Ghost house
+    edges.append((X_POS_VAR, FOOD_HOUSE_VAR))
+    edges.append((X_POS_VAR, GHOST_HOUSE_VAR))
+    edges.append((Y_POS_VAR, FOOD_HOUSE_VAR))
+    edges.append((Y_POS_VAR, GHOST_HOUSE_VAR))
+
+    # Food house -> all Observation variables
+    # Ghost house -> all Observation variables
+    for obsVar in obsVars:
+        edges.append((FOOD_HOUSE_VAR, obsVar))
+        edges.append((GHOST_HOUSE_VAR, obsVar))
+        
+    return edges
+
 def constructBayesNet(gameState):
     """
     Question 1: Bayes net structure
@@ -97,8 +125,24 @@ def constructBayesNet(gameState):
     variableDomainsDict = {}
 
     "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+    obsVars = getObservationVariables(gameState)
 
+    #setting variable domains
+    variableDomainsDict[X_POS_VAR] = X_POS_VALS
+    variableDomainsDict[Y_POS_VAR] = Y_POS_VALS
+
+    #setting house variable domains
+    variableDomainsDict[FOOD_HOUSE_VAR] = HOUSE_VALS
+    variableDomainsDict[GHOST_HOUSE_VAR] = HOUSE_VALS
+
+    edges = getBayesNetEdges(obsVars)
+
+    #setting observation variable domains
+    for obsVar in obsVars:
+        variableDomainsDict[obsVar] = OBS_VALS
+
+    
+    
     variables = [X_POS_VAR, Y_POS_VAR] + HOUSE_VARS + obsVars
     net = bn.constructEmptyBayesNet(variables, edges, variableDomainsDict)
     return net, obsVars
@@ -127,9 +171,13 @@ def fillYCPT(bayesNet, gameState):
     """
 
     yFactor = bn.Factor([Y_POS_VAR], [], bayesNet.variableDomainsDict())
-    "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+
+    yFactor.setProbability({Y_POS_VAR: BOTH_TOP_VAL}, PROB_BOTH_TOP)
+    yFactor.setProbability({Y_POS_VAR: BOTH_BOTTOM_VAL}, PROB_BOTH_BOTTOM)
+    yFactor.setProbability({Y_POS_VAR: LEFT_TOP_VAL}, PROB_ONLY_LEFT_TOP)
+    yFactor.setProbability({Y_POS_VAR: LEFT_BOTTOM_VAL}, PROB_ONLY_LEFT_BOTTOM)
     bayesNet.setCPT(Y_POS_VAR, yFactor)
+
 
 def fillHouseCPT(bayesNet, gameState):
     foodHouseFactor = bn.Factor([FOOD_HOUSE_VAR], [X_POS_VAR, Y_POS_VAR], bayesNet.variableDomainsDict())
@@ -166,6 +214,62 @@ def fillHouseCPT(bayesNet, gameState):
         ghostHouseFactor.setProbability(assignment, prob)
     bayesNet.setCPT(GHOST_HOUSE_VAR, ghostHouseFactor)
 
+def obsProbability(obsVal, isFoodHouseAtCenter, isGhostHouseAtCenter):
+
+    # neither house is at the center
+    if not isFoodHouseAtCenter and not isGhostHouseAtCenter:
+        return 1.0 if obsVal == NO_OBS_VAL else 0.0
+
+    # food House is at the center Food + Ghost
+    elif isFoodHouseAtCenter:
+        if obsVal == RED_OBS_VAL:
+            return PROB_FOOD_RED
+        elif obsVal == BLUE_OBS_VAL:
+            return 1.0 - PROB_FOOD_RED
+        else: # obsVal == NO_OBS_VAL
+            return 0.0
+
+    # ghost House is at the center 
+    elif isGhostHouseAtCenter:
+        if obsVal == RED_OBS_VAL:
+            return PROB_GHOST_RED
+        elif obsVal == BLUE_OBS_VAL:
+            return 1.0 - PROB_GHOST_RED
+        else: # obsVal == NO_OBS_VAL
+            return 0.0
+    return 0.0
+
+
+def createObsFactor(obsVar, houseCenterName, bayesNet):
+    
+    obsFactor = bn.Factor(
+        [obsVar], 
+        [FOOD_HOUSE_VAR, GHOST_HOUSE_VAR], 
+        bayesNet.variableDomainsDict()
+    )
+
+    for foodHouseVal in HOUSE_VALS:
+        for ghostHouseVal in HOUSE_VALS:
+            
+            # presence flags
+            isFoodHouseAtCenter = (foodHouseVal == houseCenterName)
+            isGhostHouseAtCenter = (ghostHouseVal == houseCenterName)
+            
+            # loop observation variable
+            for obsVal in [RED_OBS_VAL, BLUE_OBS_VAL, NO_OBS_VAL]:
+                
+                prob = obsProbability(obsVal, isFoodHouseAtCenter, isGhostHouseAtCenter)
+                
+                # assignment in the factor
+                assignment = {
+                    FOOD_HOUSE_VAR: foodHouseVal, 
+                    GHOST_HOUSE_VAR: ghostHouseVal,
+                    obsVar: obsVal
+                }
+                obsFactor.setProbability(assignment, prob)
+                
+    return obsFactor
+
 def fillObsCPT(bayesNet, gameState):
     """
     Question 2b: Bayes net probabilities
@@ -193,7 +297,23 @@ def fillObsCPT(bayesNet, gameState):
     bottomLeftPos, topLeftPos, bottomRightPos, topRightPos = gameState.getPossibleHouses()
 
     "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+    bottomLeftPos, topLeftPos, bottomRightPos, topRightPos = gameState.getPossibleHouses()
+
+    housePosMap = {
+        TOP_LEFT_VAL: topLeftPos,
+        TOP_RIGHT_VAL: topRightPos,
+        BOTTOM_LEFT_VAL: bottomLeftPos,
+        BOTTOM_RIGHT_VAL: bottomRightPos
+    }
+
+    for house in housePosMap.items():
+        for obsPos in gameState.getHouseWalls(house[1]):
+            obsVar = OBS_VAR_TEMPLATE % obsPos
+            
+            # fill the factor for this observation variable
+            obsFactor = createObsFactor(obsVar, house[0], bayesNet)
+
+            bayesNet.setCPT(obsVar, obsFactor)
 
 def getMostLikelyFoodHousePosition(evidence, bayesNet, eliminationOrder):
     """
