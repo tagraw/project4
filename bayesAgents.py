@@ -327,8 +327,22 @@ def getMostLikelyFoodHousePosition(evidence, bayesNet, eliminationOrder):
 
     (This should be a very short method.)
     """
-    "*** YOUR CODE HERE ***"
-    util.raiseNotDefined()
+    resultFactor = inference.inferenceByVariableElimination(bayesNet, [FOOD_HOUSE_VAR], evidence, eliminationOrder)
+
+    # if normalization fails/returns none, just pick arbitrary house
+    if resultFactor is None:
+        return {FOOD_HOUSE_VAR: HOUSE_VALS[0]}
+
+    # find assignment w/ max probability
+    bestAssignment = None
+    bestProb = -1.0
+    for assignment in resultFactor.getAllPossibleAssignmentDicts():
+        prob = resultFactor.getProbability(assignment)
+        if prob > bestProb:
+            bestProb = prob
+            bestAssignment = assignment
+
+    return bestAssignment
 
 
 class BayesAgent(game.Agent):
@@ -429,8 +443,40 @@ class VPIAgent(BayesAgent):
         leftExpectedValue = 0
         rightExpectedValue = 0
 
-        "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        # Compute joint distribution P(foodHouse, ghostHouse | evidence)
+        houseMarginals = inference.inferenceByVariableElimination(self.bayesNet,
+                [FOOD_HOUSE_VAR, GHOST_HOUSE_VAR], evidence, eliminationOrder)
+
+        if houseMarginals is None:
+            return leftExpectedValue, rightExpectedValue
+
+        # Sum probabilities for the two key cases: left and right configurations
+        # The houseMarginals factor contains food/ghost houses as unconditioned and
+        # all evidence variables as conditioned. We need to sum over all evidence
+        # configurations for the two key cases.
+        leftProb = 0.0
+        rightProb = 0.0
+        
+        for assignment in houseMarginals.getAllPossibleAssignmentDicts():
+            prob = houseMarginals.getProbability(assignment)
+            
+            # Case 1: food at topLeft and ghost at topRight (entering left is correct)
+            if assignment[FOOD_HOUSE_VAR] == TOP_LEFT_VAL and assignment[GHOST_HOUSE_VAR] == TOP_RIGHT_VAL:
+                leftProb += prob
+            
+            # Case 2: food at topRight and ghost at topLeft (entering right is correct)
+            if assignment[FOOD_HOUSE_VAR] == TOP_RIGHT_VAL and assignment[GHOST_HOUSE_VAR] == TOP_LEFT_VAL:
+                rightProb += prob
+
+        # Expected value for entering left:
+        # - If food is at left (topLeft) and ghost at right (topRight): win reward
+        # - If ghost is at left (topLeft) and food at right (topRight): ghost collision
+        leftExpectedValue = leftProb * WON_GAME_REWARD + rightProb * GHOST_COLLISION_REWARD
+
+        # Expected value for entering right:
+        # - If food is at right (topRight) and ghost at left (topLeft): win reward
+        # - If ghost is at right (topRight) and food at left (topLeft): ghost collision
+        rightExpectedValue = rightProb * WON_GAME_REWARD + leftProb * GHOST_COLLISION_REWARD
 
         return leftExpectedValue, rightExpectedValue
 
@@ -495,8 +541,17 @@ class VPIAgent(BayesAgent):
 
         expectedValue = 0
 
-        "*** YOUR CODE HERE ***"
-        util.raiseNotDefined()
+        # Get all possible outcomes of exploration and their probabilities
+        probsAndOutcomes = self.getExplorationProbsAndOutcomes(evidence)
+
+        # For each possible outcome, compute the best action value and weight by probability
+        for prob, outcomeEvidence in probsAndOutcomes:
+            # Compute expected values for entering left/right with the new evidence
+            leftValue, rightValue = self.computeEnterValues(outcomeEvidence, enterEliminationOrder)
+            # Take the max action value for this outcome
+            maxActionValue = max(leftValue, rightValue)
+            # Add weighted value to expected value
+            expectedValue += prob * maxActionValue
 
         return expectedValue
 
